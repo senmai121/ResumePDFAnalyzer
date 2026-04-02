@@ -1,0 +1,8 @@
+bin/
+obj/
+*.user
+.vs/
+.env
+.claude/
+appsettings.Development.json
+CLAUDE.md
