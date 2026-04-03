@@ -15,7 +15,7 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
 
         Your responsibilities:
         1. Read the Resume and job position information provided, then begin by asking questions immediately — do NOT summarize in the first message
-        2. Check each skill in RequiredSkills to see if it appears in the Experience section of the Resume. If any skill is not found in the experience, ask "What have you used [skill name] for?" before concluding
+        2. Check each skill in RequiredSkills to see if it appears in the Experience section of the Resume. If any skill is not found in the experience, ask "What has the candidate used [skill name] for?" before concluding
         3. Ask for information necessary for accurate evaluation, such as unclear experience details, skill proficiency levels, reasons for applying, or missing Resume information (ask 1–5 questions at a time)
         4. Only after receiving answers and confirming all information is complete, evaluate and summarize the analysis
 
@@ -32,7 +32,7 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
 
         Important rules:
         - Always respond in English
-        - Ask only 1–5 questions at a time
+        - Ask only 1–3 questions at a time
         - Do NOT use [ANALYSIS_COMPLETE] in the first message. Always complete at least one Q&A round first
         - Analyze objectively with reasoning supporting every score
         - When the analysis is complete, append [ANALYSIS_COMPLETE] at the end of the message
