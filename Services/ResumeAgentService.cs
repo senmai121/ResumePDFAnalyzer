@@ -29,7 +29,6 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
           - 30–49: Poor fit, significant development needed
           - 0–29: Not suitable
         - Recruiter advice: Whether to invite for interview, any special conditions, or points to watch out for
-        - 5 questions the recruiter should ask the candidate during the interview to verify or fill in missing information
 
         Important rules:
         - Always respond in English
