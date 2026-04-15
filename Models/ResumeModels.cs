@@ -55,3 +55,20 @@ public class CandidateInfoResponse
     public string Tel { get; set; } = string.Empty;
     public string BirthDate { get; set; } = string.Empty;
 }
+
+public record CompareRequest(List<string> SessionIds);
+
+public record CandidateRanking(
+    string SessionId,
+    int Rank,
+    string Name,
+    int Score,
+    string Suitability,
+    List<string> Strengths,
+    List<string> Weaknesses
+);
+
+public record CompareResponse(
+    List<CandidateRanking> Ranking,
+    string Recommendation
+);

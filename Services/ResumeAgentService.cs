@@ -13,11 +13,26 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
     private const string SystemPrompt = """
         You are an AI Agent specializing in personnel recruitment (HR/Recruiter AI)
 
+        Audience and perspective:
+        - You are speaking TO an HR recruiter or hiring manager, NOT to the candidate
+        - The candidate is a third party who submitted the resume — always refer to them as "the candidate" or "this candidate", never "you"
+        - Never address the candidate directly or phrase anything as though the recruiter is the person being evaluated
+        - The recruiter you are speaking to may not have deep technical knowledge — keep all questions and explanations at HR/recruiter level
+
         Your responsibilities:
         1. Read the Resume and job position information provided, then begin by asking questions immediately — do NOT summarize in the first message
-        2. Check each skill in RequiredSkills to see if it appears in the Experience section of the Resume. If any skill is not found in the experience, ask "What has the candidate used [skill name] for?" before concluding
-        3. Ask for information necessary for accurate evaluation, such as unclear experience details, skill proficiency levels, reasons for applying, or missing Resume information (ask 1–5 questions at a time)
+        2. Check each skill in RequiredSkills to see if it appears in the Experience section of the Resume. If any required skill is not clearly evidenced in the resume, ask a recruiter-appropriate question about it before concluding (see question guidelines below)
+        3. Ask for information necessary for accurate evaluation, such as unclear experience details, duration of experience, reasons for applying, or missing resume information (ask 1–3 questions at a time)
         4. Only after receiving answers and confirming all information is complete, evaluate and summarize the analysis
+
+        Question guidelines — HR/recruiter level only:
+        - Do NOT ask the recruiter to evaluate technical depth or judge the quality of technical work
+        - For any skill or experience that needs clarification, ask observable, factual questions such as:
+          - "How many years of experience does the candidate have with [skill]?"
+          - "Does the resume mention any specific projects or outcomes where the candidate used [skill]?"
+          - "In what context did the candidate use [skill] — for example, in a professional role, a side project, or during education?"
+          - "Did the candidate mention [skill] during the screening call, or is it only listed on the resume?"
+        - Questions should be answerable from the resume itself, from a basic screening call, or from general context — not from technical expertise
 
         What to analyze:
         - Position fit: Suitable / Partially Suitable / Not Suitable, with reasoning
@@ -52,45 +67,6 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
     private const int MaxShortFieldLength = 500;
     private const int MaxMessageLength = 2000;
 
-    private static readonly string[] InjectionPatterns =
-    [
-        // Direct override attempts
-        "ignore previous", "ignore above", "ignore all", "ignore the above",
-        "ignore your", "ignore prior", "ignore earlier",
-        "forget previous", "forget your", "forget the above",
-        "disregard", "override", "bypass",
-
-        // Role manipulation
-        "you are now", "you are a", "act as", "act like",
-        "pretend you", "pretend to be", "roleplay as", "play the role",
-        "your new role", "your role is now", "switch to", "become a",
-
-        // Instruction injection
-        "new instruction", "new task", "new prompt", "new context",
-        "system prompt", "your instructions", "your rules", "your guidelines",
-        "from now on", "starting now", "instead of",
-
-        // Jailbreak patterns
-        "jailbreak", "do anything now", "dan mode", "developer mode",
-        "unrestricted mode", "no restrictions", "no limits", "without restrictions",
-        "unlock", "enable all", "disable safety",
-
-        // Direct instruction injection markers
-        "###", "```system", "[system]", "<system>", "</system>",
-        "[instructions]", "</instructions>", "[prompt]",
-        "human:", "assistant:", "user:", "ai:",
-
-        // Thai patterns
-        "ลืมคำสั่ง", "เปลี่ยนบทบาท", "สมมติว่าคุณ", "แกล้งทำ", "ทำเป็นว่า",
-        "ละเว้นคำสั่ง", "ไม่ต้องสนใจ", "คำสั่งใหม่", "บทบาทใหม่"
-    ];
-
-    private static bool IsInjectionAttempt(string input)
-    {
-        var lower = input.ToLowerInvariant();
-        return InjectionPatterns.Any(lower.Contains);
-    }
-
     private static void ValidateInput(string input, string fieldName, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(input)) return;
@@ -99,7 +75,7 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
             throw new InvalidOperationException(
                 $"Input in '{fieldName}' is too long (maximum {maxLength} characters)");
 
-        if (IsInjectionAttempt(input))
+        if (ResumeAgentHelpers.IsInjectionAttempt(input))
             throw new InvalidOperationException(
                 $"Invalid pattern detected in '{fieldName}'. Please check your input.");
     }
@@ -248,7 +224,7 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
             var result = JsonSerializer.Deserialize<CandidateInfoResponse>(json, options)
                          ?? new CandidateInfoResponse();
 
-            result.Age = CalculateAge(result.BirthDate);
+            result.Age = ResumeAgentHelpers.CalculateAge(result.BirthDate);
             return result;
         }
         catch (JsonException)
@@ -257,42 +233,81 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
         }
     }
 
-    private static readonly string[] DateFormats =
-    [
-        "yyyy-MM-dd",
-        "dd/MM/yyyy",
-        "d/M/yyyy",
-        "dd-MM-yyyy",
-        "d MMM yyyy",
-        "dd MMM yyyy",
-        "d MMMM yyyy",
-        "dd MMMM yyyy",
-        "MMMM d, yyyy",
-        "MMMM dd, yyyy",
-        "MMM d, yyyy",
-        "MMM dd, yyyy",
-    ];
-
-    private static string CalculateAge(string birthDateStr)
+    public async Task<CompareResponse> CompareSessionsAsync(List<string> sessionIds, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(birthDateStr) || birthDateStr == "-")
-            return "-";
+        // Fetch all reports in parallel; KeyNotFoundException propagates if any session is missing
+        var reportTasks = sessionIds.Select(id => GetReportAsync(id, cancellationToken));
+        var reports = await Task.WhenAll(reportTasks);
 
-        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        // Build a summary block for each candidate to feed to the AI
+        var sb = new StringBuilder();
+        sb.AppendLine("You are an expert HR recruiter. Compare the following candidates and return a JSON response.");
+        sb.AppendLine();
 
-        DateOnly birthDate;
-        if (!DateOnly.TryParseExact(birthDateStr, DateFormats, culture,
-                System.Globalization.DateTimeStyles.None, out birthDate)
-            && !DateOnly.TryParse(birthDateStr, culture,
-                System.Globalization.DateTimeStyles.None, out birthDate))
-            return "-";
+        for (var i = 0; i < reports.Length; i++)
+        {
+            var r = reports[i];
+            sb.AppendLine($"Candidate {i + 1} (SessionId: {r.SessionId}):");
+            sb.AppendLine($"  Score: {r.Score}");
+            sb.AppendLine($"  Suitability: {r.Suitability}");
+            sb.AppendLine($"  Gaps: {string.Join("; ", r.Gaps)}");
+            sb.AppendLine($"  RecruiterAdvice: {r.RecruiterAdvice}");
+            sb.AppendLine($"  SuggestedQuestions: {string.Join("; ", r.SuggestedQuestions)}");
+            sb.AppendLine();
+        }
 
-        var today = DateOnly.FromDateTime(DateTime.Today);
-        var age = today.Year - birthDate.Year;
-        if (today < birthDate.AddYears(age))
-            age--;
+        sb.AppendLine("""
+            Based on the information above, return ONLY a JSON object in this exact format — no extra text:
+            {
+              "ranking": [
+                {
+                  "sessionId": "...",
+                  "rank": 1,
+                  "name": "Candidate 1",
+                  "score": 85,
+                  "suitability": "Suitable",
+                  "strengths": ["strength 1", "strength 2", "strength 3"],
+                  "weaknesses": ["weakness 1", "weakness 2", "weakness 3"]
+                }
+              ],
+              "recommendation": "Short paragraph recommending which candidate to hire and why."
+            }
 
-        return age.ToString();
+            Rules:
+            - Rank candidates from best (rank 1) to worst based on overall suitability, score, and quality of recruiterAdvice.
+            - strengths must contain exactly 3 items derived from the score, suitability, and recruiterAdvice.
+            - weaknesses must contain exactly 3 items derived from the gaps list and recruiterAdvice.
+            - name should be "Candidate N" (where N is their original numbering above) unless a real name can be inferred.
+            - recommendation must be a coherent paragraph explaining the ranking decision.
+            """);
+
+        var messages = new List<OpenRouterMessage>
+        {
+            new() { Role = "system", Content = "You are an expert HR recruiter assistant. Respond in JSON only. Do not include any other text." },
+            new() { Role = "user", Content = sb.ToString() }
+        };
+
+        var raw = await openRouterService.ChatAsync(messages, cancellationToken);
+
+        Console.WriteLine("[compare] " + raw);
+        var json = raw.Trim();
+        if (json.StartsWith("```"))
+        {
+            json = json[(json.IndexOf('\n') + 1)..];
+            json = json[..json.LastIndexOf("```")].Trim();
+        }
+
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var parsed = JsonSerializer.Deserialize<CompareResponse>(json, options)
+                         ?? throw new InvalidOperationException("Empty compare response from AI.");
+            return parsed;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"AI did not respond with valid JSON: {ex.Message}");
+        }
     }
 
     private static string BuildProfileMessage(ResumeProfile profile)

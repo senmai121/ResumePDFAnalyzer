@@ -8,4 +8,5 @@ public interface IResumeAgentService
     Task<ChatResponse> ContinueSessionAsync(string sessionId, string userMessage, CancellationToken cancellationToken = default);
     Task<ResumeReportResponse> GetReportAsync(string sessionId, CancellationToken cancellationToken = default);
     Task<CandidateInfoResponse> ExtractCandidateInfoAsync(string resumeText, CancellationToken cancellationToken = default);
+    Task<CompareResponse> CompareSessionsAsync(List<string> sessionIds, CancellationToken cancellationToken = default);
 }

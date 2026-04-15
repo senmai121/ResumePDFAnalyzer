@@ -84,6 +84,33 @@ public class ResumeAgentController(IResumeAgentService resumeAgentService) : Con
     }
 
     /// <summary>
+    /// Compare multiple analyzed resume sessions and return a ranked comparison
+    /// Accepts 2–3 session IDs and returns candidates ranked by suitability with strengths, weaknesses, and a recommendation
+    /// </summary>
+    [HttpPost("compare")]
+    public async Task<ActionResult<CompareResponse>> Compare(
+        [FromBody] CompareRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.SessionIds is null || request.SessionIds.Count < 2 || request.SessionIds.Count > 3)
+            return BadRequest(new { error = "You must provide between 2 and 3 session IDs to compare." });
+
+        try
+        {
+            var response = await resumeAgentService.CompareSessionsAsync(request.SessionIds, cancellationToken);
+            return Ok(response);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Extract general candidate information from Resume content using AI
     /// Returns name, age, title, email, and tel
     /// </summary>
