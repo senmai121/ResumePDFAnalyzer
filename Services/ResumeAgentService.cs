@@ -302,7 +302,12 @@ public class ResumeAgentService(IOpenRouterService openRouterService, IMemoryCac
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             var parsed = JsonSerializer.Deserialize<CompareResponse>(json, options)
                          ?? throw new InvalidOperationException("Empty compare response from AI.");
-            return parsed;
+
+            var scoreBySession = reports.ToDictionary(r => r.SessionId, r => r.Score);
+            var fixedRanking = parsed.Ranking
+                .Select(c => scoreBySession.TryGetValue(c.SessionId, out var s) ? c with { Score = s } : c)
+                .ToList();
+            return parsed with { Ranking = fixedRanking };
         }
         catch (JsonException ex)
         {
