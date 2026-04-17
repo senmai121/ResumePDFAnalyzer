@@ -15,8 +15,36 @@ public class PdfService : IPdfService
 
         foreach (var page in document.GetPages())
         {
-            var words = page.GetWords();
-            var text = string.Join(" ", words.Select(w => w.Text));
+            var words = page.GetWords().ToList();
+            string text;
+
+            // Detect two-column layout: check if words cluster into two distinct X regions
+            var midX = page.Width / 2.0;
+            var leftWords = words.Where(w => w.BoundingBox.Centroid.X < midX).ToList();
+            var rightWords = words.Where(w => w.BoundingBox.Centroid.X >= midX).ToList();
+            var hasRightContent = rightWords.Count > words.Count * 0.2; // right column has >20% of words
+
+            if (hasRightContent)
+            {
+                // Two-column: extract each column top-to-bottom, left column first
+                var leftText = string.Join(" ", leftWords
+                    .OrderByDescending(w => w.BoundingBox.Bottom)
+                    .ThenBy(w => w.BoundingBox.Left)
+                    .Select(w => w.Text));
+                var rightText = string.Join(" ", rightWords
+                    .OrderByDescending(w => w.BoundingBox.Bottom)
+                    .ThenBy(w => w.BoundingBox.Left)
+                    .Select(w => w.Text));
+                text = leftText + "\n" + rightText;
+            }
+            else
+            {
+                // Single-column: preserve natural reading order
+                text = string.Join(" ", words
+                    .OrderByDescending(w => w.BoundingBox.Bottom)
+                    .ThenBy(w => w.BoundingBox.Left)
+                    .Select(w => w.Text));
+            }
 
             pages.Add(new PageText
             {
